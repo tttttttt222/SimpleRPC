@@ -1,0 +1,73 @@
+package com.server.producer.client.comsumer;
+
+import com.server.producer.PackageDecoder;
+import com.server.producer.PackageEncoder;
+import com.server.producer.client.ConnectionWatchdog;
+import com.server.producer.client.ConnectorIdleStateTrigger;
+import io.netty.bootstrap.Bootstrap;
+import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.timeout.IdleStateHandler;
+import io.netty.util.HashedWheelTimer;
+
+import java.util.concurrent.TimeUnit;
+
+/**
+ * 项目名称:producer
+ * 描述:
+ * 创建人:ryw
+ * 创建时间:2017/11/7
+ */
+public class ComsumerClient {
+
+    protected HashedWheelTimer timer = new HashedWheelTimer();
+
+    private Bootstrap bootstrap;
+
+
+    public void connect(int port, String host , final String sender , final OnDataCommingListener onDataCommingListener) throws Exception {
+        EventLoopGroup group = new NioEventLoopGroup();
+        bootstrap = new Bootstrap();
+        bootstrap.group(group).channel(NioSocketChannel.class);
+
+        //断线重连
+        final ConnectionWatchdog watchdog = new ConnectionWatchdog(bootstrap, timer, port, host, true) {
+
+            public ChannelHandler[] handlers() {
+                return new ChannelHandler[]{
+                        this,
+                        new IdleStateHandler(0,5,0, TimeUnit.SECONDS),
+                        new ConnectorIdleStateTrigger(),
+                        new PackageDecoder(),
+                        new PackageEncoder(),
+                        new ReceiverMsgHandler(sender,onDataCommingListener)
+                };
+            }
+        };
+
+        ChannelFuture channelFuture;
+        try {
+            synchronized (bootstrap) {
+                bootstrap.handler(new ChannelInitializer<Channel>() {
+                    protected void initChannel(Channel channel) throws Exception {
+                        channel.pipeline().addLast(watchdog.handlers());
+                    }
+                });
+                channelFuture = bootstrap.connect(host,port);
+            }
+
+            channelFuture.sync();
+        } catch (Exception e) {
+            throw new Exception("connects to fails", e);
+        }
+
+    }
+
+
+ /*   public static void main(String args[]) throws Exception {
+        int port = 8900;
+        new ComsumerClient().connect(port, "127.0.0.1");
+    }*/
+
+}
